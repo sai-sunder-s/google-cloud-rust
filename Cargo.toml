@@ -26,6 +26,7 @@ members = [
   "src/root",
   "src/base",
   "src/auth",
+  "src/auth2",
   "src/gax",
   "src/wkt",
   "src/generated/longrunning",
