@@ -51,12 +51,12 @@ impl<T> CredentialTrait for MDSCredential<T>
 where
     T: TokenProvider,
 {
-    async fn get_token(&self) -> Result<Token> {
+    async fn get_token(&self, timeout: std::time::Duration) -> Result<Token> {
         self.token_provider.get_token().await
     }
 
-    async fn get_headers(&self) -> Result<Vec<(HeaderName, HeaderValue)>> {
-        let token = self.get_token().await?;
+    async fn get_headers(&self, timeout: std::time::Duration) -> Result<Vec<(HeaderName, HeaderValue)>> {
+        let token = self.get_token(timeout).await?;
         let mut value = HeaderValue::from_str(&format!("{} {}", token.token_type, token.token))
             .map_err(CredentialError::non_retryable)?;
         value.set_sensitive(true);
@@ -194,8 +194,21 @@ mod test {
         let mdsc = MDSCredential {
             token_provider: mock,
         };
-        let actual = mdsc.get_token().await.unwrap();
+        let actual = mdsc.get_token(Duration::from_millis(10)).await.unwrap();
         assert_eq!(actual, expected);
+    }
+
+     #[tokio::test]
+    async fn get_token_failure_timeout() {
+        let mut mock = MockTokenProvider::new();
+        mock.expect_get_token()
+            .times(1)
+            .return_once(|| Err(CredentialError::non_retryable("fail")));
+
+        let mdsc = MDSCredential {
+            token_provider: mock,
+        };
+        assert!(mdsc.get_token(Duration::from_millis(1)).await.is_err());
     }
 
     #[tokio::test]
@@ -227,14 +240,14 @@ mod test {
             metadata: None,
         };
 
-        let mut mock = MockTokenProvider::new();
-        mock.expect_get_token().times(1).return_once(|| Ok(token));
+        let mut mock = MockPolicy::new();
+        mock.expect_get_token().times(1).returning(|_| Ok(token));
 
         let mdsc = MDSCredential {
             token_provider: mock,
         };
         let headers: Vec<HV> = mdsc
-            .get_headers()
+            .get_headers(Duration::from_millis(10))
             .await
             .unwrap()
             .into_iter()

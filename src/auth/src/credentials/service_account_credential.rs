@@ -160,12 +160,12 @@ impl<T> CredentialTrait for ServiceAccountCredential<T>
 where
     T: TokenProvider,
 {
-    async fn get_token(&self) -> Result<Token> {
+    async fn get_token(&self, timeout: std::time::Duration) -> Result<Token> {
         self.token_provider.get_token().await
     }
 
-    async fn get_headers(&self) -> Result<Vec<(HeaderName, HeaderValue)>> {
-        let token = self.get_token().await?;
+    async fn get_headers(&self, timeout: std::time::Duration) -> Result<Vec<(HeaderName, HeaderValue)>> {
+        let token = self.get_token(timeout).await?;
         let mut value = HeaderValue::from_str(&format!("{} {}", token.token_type, token.token))
             .map_err(CredentialError::non_retryable)?;
         value.set_sensitive(true);
@@ -221,11 +221,10 @@ mod test {
         let sac = ServiceAccountCredential {
             token_provider: mock,
         };
-        let actual = sac.get_token().await.unwrap();
+        let actual = sac.get_token(Duration::from_millis(10)).await.unwrap();
         assert_eq!(actual, expected);
     }
-
-    #[tokio::test]
+#[tokio::test]
     async fn get_token_failure() {
         let mut mock = MockTokenProvider::new();
         mock.expect_get_token()
@@ -235,7 +234,51 @@ mod test {
         let sac = ServiceAccountCredential {
             token_provider: mock,
         };
-        assert!(sac.get_token().await.is_err());
+        assert!(sac.get_token(Duration::from_millis(1)).await.is_err());
+    }
+
+#[tokio::test]
+async fn get_headers_success() {
+        #[derive(Debug, PartialEq)]
+        struct HV {
+            header: String,
+            value: String,
+            is_sensitive: bool,
+        }
+
+        let token = Token {
+            token: "test-token".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: None,
+            metadata: None,
+        };
+
+        let mut mock = MockTokenProvider::new();
+        mock.expect_get_token().times(1).return_once(|| Ok(token));
+
+        let sac = ServiceAccountCredential {
+            token_provider: mock,
+        };
+        let headers: Vec<HV> = sac
+            .get_headers(Duration::from_millis(10))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(h, v)| HV {
+                header: h.to_string(),
+                value: v.to_str().unwrap().to_string(),
+                is_sensitive: v.is_sensitive(),
+            })
+            .collect();
+
+        assert_eq!(
+            headers,
+            vec![HV {
+                header: AUTHORIZATION.to_string(),
+                value: "Bearer test-token".to_string(),
+                is_sensitive: true,
+            }]
+        );
     }
 
     #[tokio::test]
@@ -261,7 +304,7 @@ mod test {
             token_provider: mock,
         };
         let headers: Vec<HV> = sac
-            .get_headers()
+            .get_headers(Duration::from_millis(10))
             .await
             .unwrap()
             .into_iter()
@@ -292,7 +335,7 @@ mod test {
         let sac = ServiceAccountCredential {
             token_provider: mock,
         };
-        assert!(sac.get_headers().await.is_err());
+        assert!(sac.get_headers(Duration::from_millis(1)).await.is_err());
     }
 
     fn get_mock_service_account() -> ServiceAccountInfo {

@@ -82,12 +82,12 @@ where
 }
 
 impl Credential {
-    pub async fn get_token(&self) -> Result<crate::token::Token> {
-        self.inner.get_token().await
+    pub async fn get_token(&self, timeout: std::time::Duration) -> Result<crate::token::Token> {
+        self.inner.get_token(timeout).await
     }
 
-    pub async fn get_headers(&self) -> Result<Vec<(HeaderName, HeaderValue)>> {
-        self.inner.get_headers().await
+    pub async fn get_headers(&self, timeout: std::time::Duration) -> Result<Vec<(HeaderName, HeaderValue)>> {
+        self.inner.get_headers(timeout).await
     }
 
     pub async fn get_universe_domain(&self) -> Option<String> {
@@ -140,7 +140,7 @@ pub trait CredentialTrait: std::fmt::Debug {
     ///
     /// Returns a [Token][crate::token::Token] for the current credentials.
     /// The underlying implementation refreshes the token as needed.
-    fn get_token(&self) -> impl Future<Output = Result<crate::token::Token>> + Send;
+    fn get_token(&self, timeout: std::time::Duration) -> impl Future<Output = Result<crate::token::Token>> + Send;
 
     /// Asynchronously constructs the auth headers.
     ///
@@ -149,7 +149,7 @@ pub trait CredentialTrait: std::fmt::Debug {
     /// sent with a request.
     ///
     /// The underlying implementation refreshes the token as needed.
-    fn get_headers(&self) -> impl Future<Output = Result<Vec<(HeaderName, HeaderValue)>>> + Send;
+    fn get_headers(&self, timeout: std::time::Duration) -> impl Future<Output = Result<Vec<(HeaderName, HeaderValue)>> + Send;
 
     /// Retrieves the universe domain associated with the credential, if any.
     fn get_universe_domain(&self) -> impl Future<Output = Option<String>> + Send;
@@ -166,7 +166,7 @@ pub(crate) mod dynamic {
         ///
         /// Returns a [Token][crate::token::Token] for the current credentials.
         /// The underlying implementation refreshes the token as needed.
-        async fn get_token(&self) -> Result<crate::token::Token>;
+        async fn get_token(&self, timeout: std::time::Duration) -> Result<crate::token::Token>;
 
         /// Asynchronously constructs the auth headers.
         ///
@@ -175,7 +175,7 @@ pub(crate) mod dynamic {
         /// sent with a request.
         ///
         /// The underlying implementation refreshes the token as needed.
-        async fn get_headers(&self) -> Result<Vec<(HeaderName, HeaderValue)>>;
+        async fn get_headers(&self, timeout: std::time::Duration) -> Result<Vec<(HeaderName, HeaderValue)>>;
 
         /// Retrieves the universe domain associated with the credential, if any.
         async fn get_universe_domain(&self) -> Option<String> {
@@ -189,11 +189,11 @@ pub(crate) mod dynamic {
     where
         T: super::CredentialTrait + Send + Sync,
     {
-        async fn get_token(&self) -> Result<crate::token::Token> {
-            T::get_token(self).await
+        async fn get_token(&self, timeout: std::time::Duration) -> Result<crate::token::Token> {
+            T::get_token(self, timeout).await
         }
-        async fn get_headers(&self) -> Result<Vec<(HeaderName, HeaderValue)>> {
-            T::get_headers(self).await
+        async fn get_headers(&self, timeout: std::time::Duration) -> Result<Vec<(HeaderName, HeaderValue)>> {
+            T::get_headers(self, timeout).await
         }
         async fn get_universe_domain(&self) -> Option<String> {
             T::get_universe_domain(self).await

@@ -125,12 +125,56 @@ impl<T> CredentialTrait for UserCredential<T>
 where
     T: TokenProvider,
 {
-    async fn get_token(&self) -> Result<Token> {
-        self.token_provider.get_token().await
+    async fn get_token_with_timeout(&self, timeout: std::time::Duration) -> Result<Token> {
+        let client = Client::builder().timeout(timeout).build().map_err(CredentialError::retryable)?;
+
+        // Make the request
+        let req = Oauth2RefreshRequest {
+            grant_type: RefreshGrantType::RefreshToken,
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            refresh_token: self.refresh_token.clone(),
+        };
+        let header = HeaderValue::from_static("application/json");
+        let builder = client
+            .request(Method::POST, self.endpoint.as_str())
+            .header(CONTENT_TYPE, header)
+            .json(&req);
+        let resp = builder.send().await.map_err(CredentialError::retryable)?;
+        
+        // Process the response
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp
+                .text()
+                .await
+                .map_err(|e| CredentialError::new(is_retryable(status), e.into()))?;
+            return Err(CredentialError::new(
+                is_retryable(status),
+                Box::from(format!("Failed to fetch token. {body}")),
+            ));
+        }
+        let response = resp.json::<Oauth2RefreshResponse>().await.map_err(|e| {
+            let retryable = !e.is_decode();
+            CredentialError::new(retryable, e.into())
+        })?;
+        let token = Token {
+            token: response.access_token,
+            token_type: response.token_type,
+            expires_at: response
+                .expires_in
+                .map(|d| OffsetDateTime::now_utc() + Duration::from_secs(d)),
+            metadata: None,
+        };
+        Ok(token)
     }
 
-    async fn get_headers(&self) -> Result<Vec<(HeaderName, HeaderValue)>> {
-        let token = self.get_token().await?;
+    async fn get_token(&self, timeout: std::time::Duration) -> Result<Token> {
+        self.token_provider.get_token_with_timeout(timeout).await
+    }
+
+    async fn get_headers(&self, timeout: std::time::Duration) -> Result<Vec<(HeaderName, HeaderValue)>> {
+        let token = self.get_token(timeout).await?;
         let mut value = HeaderValue::from_str(&format!("{} {}", token.token_type, token.token))
             .map_err(CredentialError::non_retryable)?;
         value.set_sensitive(true);
@@ -292,9 +336,10 @@ mod test {
             token_provider: mock,
             quota_project_id: None,
         };
-        let actual = uc.get_token().await.unwrap();
+        let actual = uc.get_token(Duration::from_millis(10)).await.unwrap();
         assert_eq!(actual, expected);
     }
+
 
     #[tokio::test]
     async fn get_token_failure() {
@@ -540,7 +585,7 @@ mod test {
             quota_project_id: None,
         };
         let now = OffsetDateTime::now_utc();
-        let token = uc.get_token().await?;
+        let token = uc.get_token(Duration::from_secs(10)).await?;
         assert_eq!(token.token, "test-access-token");
         assert_eq!(token.token_type, "test-token-type");
         assert!(
@@ -552,6 +597,57 @@ mod test {
             token.expires_at
         );
 
+        Ok(())
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn token_provider_get_token_timeout_fail() -> TestResult {
+        let response = Oauth2RefreshResponse {
+            access_token: "test-access-token".to_string(),
+            expires_in: Some(3600),
+            token_type: "test-token-type".to_string(),
+            scope: Some("scope1".to_string()),
+            refresh_token: Some("test-refresh-token".to_string()),
+        };
+        let response_body = serde_json::to_string(&response).unwrap();
+        let (endpoint, _server) = start(StatusCode::OK, response_body).await;
+        println!("endpoint = {endpoint}");
+        let token_provider = UserTokenProvider {
+            client_id: "test-client-id".to_string(),
+            client_secret: "test-client-secret".to_string(),
+            refresh_token: "test-refresh-token".to_string(),
+            endpoint: endpoint.clone(),
+        };
+        let uc = UserCredential {
+            token_provider: token_provider,
+            quota_project_id: None,
+        };
+        let token = uc.get_token(Duration::from_millis(1)).await;
+        assert!(token.is_err());
+        Ok(())
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn token_provider_failure() -> TestResult {
+        let response = Oauth2RefreshResponse {
+            access_token: "test-access-token".to_string(),
+            expires_in: None,
+            token_type: "test-token-type".to_string(),
+            scope: None,
+            refresh_token: None,
+        };
+        let response_body = serde_json::to_string(&response).unwrap();
+        let (endpoint, _server) = start(StatusCode::OK, response_body).await;
+        let token_provider = UserTokenProvider {
+            client_id: "test-client-id".to_string(),
+            client_secret: "test-client-secret".to_string(),
+            refresh_token: "test-refresh-token".to_string(),
+            endpoint: endpoint,
+        };
+        let uc = UserCredential {
+            token_provider: token_provider,
+            quota_project_id: None,
+        };
+        let token = uc.get_token(Duration::from_millis(1)).await;
+        assert!(token.is_err());
         Ok(())
     }
 
