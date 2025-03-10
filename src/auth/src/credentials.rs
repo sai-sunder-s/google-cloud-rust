@@ -252,7 +252,11 @@ pub(crate) mod dynamic {
 /// [gce-link]: https://cloud.google.com/products/compute
 /// [gcloud auth application-default]: https://cloud.google.com/sdk/gcloud/reference/auth/application-default
 /// [gke-link]: https://cloud.google.com/kubernetes-engine
-pub async fn create_access_token_credential() -> Result<Credential> {
+use http_client::client::ClientConfig;
+use http_client::client::ReqwestClient;
+pub async fn create_access_token_credential(config: Option<ClientConfig>, default_endpoint: &str) -> Result<Credential> {
+    let config = config.unwrap_or(ClientConfig::default());
+    let client = ReqwestClient::new(config.clone(), default_endpoint).await.map_err(Error::authentication)?;
     let contents = match load_adc()? {
         AdcContents::Contents(contents) => contents,
         AdcContents::FallbackToMds => return Ok(mds_credential::new()),
@@ -263,15 +267,45 @@ pub async fn create_access_token_credential() -> Result<Credential> {
         .get("type")
         .ok_or_else(|| CredentialError::non_retryable_from_str("Failed to parse Application Default Credentials (ADC). No `type` field found."))?
         .as_str()
-        .ok_or_else(|| CredentialError::non_retryable_from_str("Failed to parse Application Default Credentials (ADC). `type` field is not a string.")
+        .ok_or_else(|| CredCredentialError::non_retryable_from_str("Failed to parse Application Default Credentials (ADC). `type` field is not a string.")
         )?;
     match cred_type {
-        "authorized_user" => user_credential::creds_from(js),
-        "service_account" => service_account_credential::creds_from(js),
+        "authorized_user" => user_credential::creds_from(js,client),
+        "service_account" => service_account_credential::creds_from(js,client),
         _ => Err(CredentialError::non_retryable_from_str(format!(
             "Unimplemented credential type: {cred_type}"
         ))),
     }
+}
+use crate::errors::CredentialError;
+use crate::Result;
+use http::header::{HeaderName, HeaderValue};
+use std::future::Future;
+use std::sync::Arc;
+use reqwest::RequestBuilder;
+use http_client::client::ClientConfig;
+use http_client::client::ReqwestClient;
+use http_client::client::NoBody;
+
+pub(crate) const QUOTA_PROJECT_KEY: &str = "x-goog-user-project";
+mod api_key_credential;
+// Export API Key factory function and options
+pub use api_key_credential::create_api_key_credential;
+pub use api_key_credential::ApiKeyOptions;
+
+pub(crate) mod mds_credential;
+mod service_account_credential;
+pub(crate) mod user_credential;
+
+#[derive(Clone, Debug)]
+pub struct ReqwestClient {
+    inner: reqwest::Client,
+    endpoint: String,
+    retry_policy: Option<Arc<dyn RetryPolicy>>,
+    backoff_policy: Option<Arc<dyn BackoffPolicy>>,
+    retry_throttler: RetryThrottlerWrapped,
+    polling_policy: Option<Arc<dyn PollingPolicy>>,
+    polling_backoff_policy: Option<Arc<dyn PollingBackoffPolicy>>,
 }
 
 #[derive(Debug, PartialEq)]

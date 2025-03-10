@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use auth::credentials::Credential;
 use crate::backoff_policy::BackoffPolicy;
 use crate::error::Error;
 use crate::error::HttpError;
@@ -25,20 +26,7 @@ use crate::polling_policy::PollingPolicy;
 use crate::retry_policy::RetryPolicy;
 use crate::retry_throttler::RetryThrottlerWrapped;
 use crate::Result;
-use auth::credentials::{create_access_token_credential, Credential};
 use std::sync::Arc;
-
-#[derive(Clone, Debug)]
-pub struct ReqwestClient {
-    inner: reqwest::Client,
-    cred: Credential,
-    endpoint: String,
-    retry_policy: Option<Arc<dyn RetryPolicy>>,
-    backoff_policy: Option<Arc<dyn BackoffPolicy>>,
-    retry_throttler: RetryThrottlerWrapped,
-    polling_policy: Option<Arc<dyn PollingPolicy>>,
-    polling_backoff_policy: Option<Arc<dyn PollingBackoffPolicy>>,
-}
 
 impl ReqwestClient {
     pub async fn new(config: ClientConfig, default_endpoint: &str) -> Result<Self> {
@@ -46,7 +34,7 @@ impl ReqwestClient {
         let cred = if let Some(c) = config.cred {
             c
         } else {
-            create_access_token_credential()
+            auth::credentials::create_access_token_credential()
                 .await
                 .map_err(Error::authentication)?
         };
@@ -63,6 +51,35 @@ impl ReqwestClient {
             polling_policy: config.polling_policy,
             polling_backoff_policy: config.polling_backoff_policy,
         })
+    }
+
+    pub async fn execute<I: serde::ser::Serialize, O: serde::de::DeserializeOwned>(
+        &self,
+        mut builder: reqwest::RequestBuilder,
+        body: Option<I>,
+        options: crate::options::RequestOptions,
+    ) -> Result<O> {
+        if let Some(user_agent) = options.user_agent() {
+            builder = builder.header(
+                reqwest::header::USER_AGENT,
+                reqwest::header::HeaderValue::from_str(user_agent).map_err(Error::other)?,
+            );
+        }
+        if let Some(body) = body {
+            builder = builder.json(&body);
+        }
+        let auth_headers = self
+            .cred
+            .get_headers()
+            .await
+            .map_err(Error::authentication)?;
+        for header in auth_headers.into_iter() {
+            builder = builder.header(header.0, header.1);
+        }
+        match self.get_retry_policy(&options) {
+            None => self.request_attempt::<O>(builder, &options, None).await,
+            Some(policy) => self.retry_loop::<O>(builder, &options, policy).await,
+        }
     }
 
     pub fn builder(&self, method: reqwest::Method, path: String) -> reqwest::RequestBuilder {
@@ -178,14 +195,7 @@ impl ReqwestClient {
         {
             builder = builder.timeout(timeout);
         }
-        let auth_headers = self
-            .cred
-            .get_headers()
-            .await
-            .map_err(Error::authentication)?;
-        for header in auth_headers.into_iter() {
-            builder = builder.header(header.0, header.1);
-        }
+
         let response = builder.send().await.map_err(Error::io)?;
         if !response.status().is_success() {
             return Self::to_http_error(response).await;
@@ -281,11 +291,33 @@ pub struct NoBody {}
 const SENSITIVE_HEADER: &str = "[sensitive]";
 
 pub type ClientConfig = crate::options::ClientConfig;
-
+#[derive(serde::Serialize,Default)]
+pub struct ClientConfig {
+    pub endpoint: Option<String>,
+    pub retry_policy: Option<Arc<dyn RetryPolicy>>,
+    pub backoff_policy: Option<Arc<dyn BackoffPolicy>>,
+    pub retry_throttler: RetryThrottlerWrapped,
+    pub polling_policy: Option<Arc<dyn PollingPolicy>>,
+    pub polling_backoff_policy: Option<Arc<dyn PollingBackoffPolicy>>,
+}
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: None,
+            retry_policy: None,
+            backoff_policy: None,
+            retry_throttler: RetryThrottlerWrapped::new(),
+            polling_policy: None,
+            polling_backoff_policy: None,
+            cred:None
+        }
+    }
+}
 #[cfg(test)]
 mod test {
     use super::*;
     use std::collections::HashMap;
+    use auth::credentials::create_access_token_credential;
     type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
     #[test]
@@ -401,3 +433,4 @@ mod test {
         Ok(())
     }
 }
+const SENSITIVE_HEADER: &str = "[sensitive]";

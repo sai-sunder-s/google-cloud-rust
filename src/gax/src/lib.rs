@@ -56,16 +56,17 @@ pub mod error;
 #[cfg(feature = "unstable-stream")]
 pub mod paginator;
 
-/// Defines traits and helpers for HTTP client implementations.
+/// Implements helpers to create telemetry headers.
 #[cfg(feature = "unstable-sdk-client")]
 #[doc(hidden)]
-pub mod http_client;
+pub mod api_header;
 
-pub mod backoff_policy;
-pub mod exponential_backoff;
 pub mod loop_state;
 pub mod options;
-pub mod polling_backoff_policy;
-pub mod polling_policy;
-pub mod retry_policy;
-pub mod retry_throttler;
+
+pub use http_client::backoff_policy;
+pub use http_client::exponential_backoff;
+pub use http_client::polling_backoff_policy;
+pub use http_client::polling_policy;
+pub use http_client::retry_policy;
+pub use http_client::retry_throttler;
