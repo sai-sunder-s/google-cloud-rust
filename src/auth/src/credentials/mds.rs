@@ -59,6 +59,7 @@ use crate::headers_util::build_bearer_headers;
 use crate::token::{Token, TokenProvider};
 use async_trait::async_trait;
 use bon::Builder;
+use gax::retry_policy::RetryPolicy;
 use http::header::{HeaderName, HeaderValue};
 use reqwest::Client;
 use std::default::Default;
@@ -97,6 +98,7 @@ pub struct Builder {
     quota_project_id: Option<String>,
     scopes: Option<Vec<String>>,
     universe_domain: Option<String>,
+    retry_policy: Option<Arc<dyn RetryPolicy>>,
 }
 
 impl Builder {
@@ -157,6 +159,11 @@ impl Builder {
         S: Into<String>,
     {
         self.scopes = Some(scopes.into_iter().map(|s| s.into()).collect());
+        self
+    }
+
+    pub fn with_retry_policy(mut self, retry_policy: Arc<dyn RetryPolicy>) -> Self {
+        self.retry_policy = Some(retry_policy);
         self
     }
 
@@ -224,6 +231,7 @@ struct MDSAccessTokenProvider {
     scopes: Option<Vec<String>>,
     #[builder(into)]
     endpoint: String,
+    retry_policy: Option<Arc<dyn RetryPolicy>>,
 }
 
 impl MDSAccessTokenProvider {
@@ -258,31 +266,18 @@ impl TokenProvider for MDSAccessTokenProvider {
             }
         };
 
-        let request = client
-            .get(format!("{}{}/token", self.endpoint, MDS_DEFAULT_URI))
+        let client = crate::http::ReqwestClient::new(self.endpoint.clone(), self.retry_policy.clone());
+
+        let request = client.builder(reqwest::Method::GET, format!("{}/token", MDS_DEFAULT_URI))
             .query(&[("scopes", scopes)])
             .header(
                 METADATA_FLAVOR,
                 HeaderValue::from_static(METADATA_FLAVOR_VALUE),
             );
 
-        let response = request.send().await.map_err(errors::retryable)?;
-        // Process the response
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .text()
-                .await
-                .map_err(|e| CredentialsError::new(is_retryable(status), e))?;
-            return Err(CredentialsError::from_str(
-                is_retryable(status),
-                format!("Failed to fetch token. {body}"),
-            ));
-        }
-        let response = response.json::<MDSTokenResponse>().await.map_err(|e| {
-            let retryable = !e.is_decode();
-            CredentialsError::new(retryable, e)
-        })?;
+        let response: MDSTokenResponse = client.execute(request, None::<crate::http::NoBody>).await.unwrap();
+        // let response = response.body();
+
         let token = Token {
             token: response.access_token,
             token_type: response.token_type,
