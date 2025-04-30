@@ -141,6 +141,38 @@ mod test {
     }
 
     #[tokio::test]
+    async fn create_access_token_credentials_json_url_sourced_credentials() {
+        let contents = r#"{
+            "type": "external_account",
+            "audience": "//iam.googleapis.com/projects/654269145772/locations/global/workloadIdentityPools/byoid-pool/providers/azure-pid",
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "token_url": "https://sts.googleapis.com/v1beta/token",
+            "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/byoid-test@cicpclientproj.iam.gserviceaccount.com:generateAccessToken",
+            "credential_source": {
+              "url": "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://iam.googleapis.com/projects/654269145772/locations/global/workloadIdentityPools/byoid-pool/providers/azure-pid",
+              "headers": {
+                "Metadata": "True"
+              },
+              "format": {
+                "type": "json",
+                "subject_token_field_name": "access_token"
+              }
+            }
+          }"#;
+
+        let uc = AccessTokenCredentialBuilder::new(serde_json::from_str(contents).unwrap())
+            .build()
+            .unwrap();
+
+        let fmt = format!("{:?}", uc);
+        print!("{:?}", uc);
+        assert!(fmt.contains("UrlSourcedCredentials"));
+
+        let tokens = uc.token().await.unwrap();
+        println!("{}", tokens.token);
+    }
+
+    #[tokio::test]
     #[serial_test::serial]
     async fn create_access_token_credentials_adc_service_account_credentials() {
         let contents = r#"{

@@ -20,6 +20,10 @@ pub mod mds;
 pub mod service_account;
 pub mod user_account;
 
+pub mod url_sourced_external_account;
+
+pub(crate) mod internal;
+
 use crate::Result;
 use crate::errors::{self, CredentialsError};
 use http::header::{HeaderName, HeaderValue};
@@ -480,6 +484,7 @@ fn build_credentials(
                     quota_project_id,
                     scopes
                 ),
+                "external_account" => url_sourced_external_account::new(json),
                 _ => Err(errors::non_retryable_from_str(format!(
                     "Invalid or unsupported credentials type found in JSON: {cred_type}"
                 ))),
