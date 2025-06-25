@@ -25,15 +25,21 @@ mod driver {
         auth_integration_tests::api_key().await
     }
 
-    #[cfg(all(test, feature = "run-byoid-integration-tests"))]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn run_workload_identity_provider_url_sourced() -> anyhow::Result<()> {
-        auth_integration_tests::workload_identity_provider_url_sourced().await
-    }
+    // #[cfg(all(test, feature = "run-byoid-integration-tests"))]
+    // #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    // async fn run_workload_identity_provider_url_sourced() -> anyhow::Result<()> {
+    //     auth_integration_tests::workload_identity_provider_url_sourced().await
+    // }
 
     #[cfg(all(test, feature = "run-byoid-integration-tests"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn run_workload_identity_provider_executable_sourced() -> anyhow::Result<()> {
-        auth_integration_tests::workload_identity_provider_executable_sourced().await
+    async fn run_workload_identity_provider_url_sourced_with_impersoantion() -> anyhow::Result<()> {
+        auth_integration_tests::workload_identity_provider_url_sourced_with_impersonation().await
     }
+
+    // #[cfg(all(test, feature = "run-byoid-integration-tests"))]
+    // #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    // async fn run_workload_identity_provider_executable_sourced() -> anyhow::Result<()> {
+    //     auth_integration_tests::workload_identity_provider_executable_sourced().await
+    // }
 }

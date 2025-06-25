@@ -177,6 +177,64 @@ pub async fn workload_identity_provider_url_sourced() -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn workload_identity_provider_url_sourced_with_impersonation() -> anyhow::Result<()> {
+    let project = std::env::var("GOOGLE_CLOUD_PROJECT").expect("GOOGLE_CLOUD_PROJECT not set");
+    let audience = get_oidc_audience();
+    let (service_account, client_email) = get_byoid_service_account_and_email();
+
+    let id_token = generate_id_token(audience.clone(), client_email, service_account).await?;
+
+    let source_token_response_body = serde_json::json!({
+        "id_token": id_token,
+    });
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(all_of![
+            request::method_path("GET", "/source_token"),
+            request::headers(contains(("metadata", "True",))),
+        ])
+        .respond_with(json_encoded(source_token_response_body)),
+    );
+
+    let contents = serde_json::json!({
+      "type": "external_account",
+      "audience": audience,
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/impersonation-target@cloud-sdk-auth-test-project.iam.gserviceaccount.com:generateAccessToken",
+      "credential_source": {
+        "url": server.url("/source_token").to_string(),
+        "headers": {
+          "Metadata": "True"
+        },
+        "format": {
+          "type": "json",
+          "subject_token_field_name": "id_token"
+        }
+      }
+    });
+
+    // Create external account with Url sourced creds
+    let creds = ExternalAccountCredentialsBuilder::new(contents).build()?;
+
+    // Construct a BigQuery client using the credentials.
+    // Using BigQuery as it doesn't require a billing account.
+    let client = DatasetService::builder()
+        .with_credentials(creds)
+        .build()
+        .await?;
+
+    // Make a request using the external account credentials
+    client
+        .list_datasets()
+        .set_project_id(project)
+        .send()
+        .await?;
+
+    Ok(())
+}
+
 pub async fn workload_identity_provider_executable_sourced() -> anyhow::Result<()> {
     // allow command execution
     let _e = ScopedEnv::set("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", "1");
@@ -278,8 +336,8 @@ fn get_byoid_service_account_and_email() -> (serde_json::Value, String) {
 }
 
 fn get_byoid_service_account() -> serde_json::Value {
-    let path = std::env::var("GOOGLE_WORKLOAD_IDENTITY_CREDENTIALS")
-        .expect("GOOGLE_WORKLOAD_IDENTITY_CREDENTIALS not set");
+    let path = std::env::var("GOOGLE_WORKLOAD_IDENTITY_SERVICE_ACCOUNT")
+        .expect("GOOGLE_WORKLOAD_IDENTITY_SERVICE_ACCOUNT not set");
 
     let service_account_content =
         std::fs::read_to_string(path).expect("unable to read service account");

@@ -20,9 +20,9 @@ environment variables with the workload identity pool configuration are required
 to run the tests.
 
 ```sh
-env GOOGLE_CLOUD_PROJECT=cloud-sdk-auth-test-project \
-    GOOGLE_WORKLOAD_IDENTITY_SERVICE_ACCOUNT=[SERVICE ACCOUNT PLACEHOLDER] \
-    GOOGLE_WORKLOAD_IDENTITY_OIDC_AUDIENCE=[AUDIENCE PLACEHOLDER] \
+export GOOGLE_CLOUD_PROJECT=cloud-sdk-auth-test-project \
+    GOOGLE_WORKLOAD_IDENTITY_SERVICE_ACCOUNT=/usr/local/google/home/saisunder/data/creds/cloudsdkauthtestbyoidsa.json \
+    GOOGLE_WORKLOAD_IDENTITY_OIDC_AUDIENCE=//iam.googleapis.com/projects/14733326273/locations/global/workloadIdentityPools/google-idp/providers/google-idp \
   cargo test run_workload_ --features run-integration-tests --features run-byoid-integration-tests -p auth-integration-tests
 ```
 

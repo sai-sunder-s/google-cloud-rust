@@ -76,6 +76,7 @@ struct ExternalAccountFile {
     client_id: Option<String>,
     client_secret: Option<String>,
     scopes: Option<Vec<String>>,
+    service_account_impersonation_url: Option<String>,
     credential_source: CredentialSourceFile,
 }
 
@@ -96,6 +97,7 @@ impl From<ExternalAccountFile> for ExternalAccountConfig {
             token_url: config.token_url,
             credential_source: config.credential_source.into(),
             scopes: scope,
+            service_account_impersonation_url: config.service_account_impersonation_url,
         }
     }
 }
@@ -130,6 +132,7 @@ struct ExternalAccountConfig {
     client_secret: Option<String>,
     scopes: Vec<String>,
     credential_source: CredentialSource,
+    service_account_impersonation_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,20 +145,43 @@ enum CredentialSource {
 }
 
 impl ExternalAccountConfig {
-    fn make_credentials(self, quota_project_id: Option<String>) -> Credentials {
-        let config = self.clone();
-        match self.credential_source {
-            CredentialSource::Url(source) => {
-                Self::make_credentials_from_source(source, config, quota_project_id)
+    fn make_credentials(self, quota_project_id: Option<String>) -> BuildResult<Credentials> {
+        if let Some(impersonation_url) = self.service_account_impersonation_url.as_deref() {
+            let target_principal = super::impersonated::parse_target_principal_from_impersonation_url(impersonation_url)?;
+
+            let source_config = ExternalAccountConfig {
+                service_account_impersonation_url: None,
+                scopes: vec![DEFAULT_SCOPE.to_string()],
+                ..self.clone()
+            };
+
+            // what to do with quota?
+            let source_credentials = source_config.make_credentials(None)?;
+            
+            let mut impersonated_builder =super::impersonated::Builder::from_source_credentials(source_credentials)
+                .with_target_principal(target_principal)
+                .with_scopes(self.scopes);
+
+            if let Some(qpid) = quota_project_id {
+                impersonated_builder = impersonated_builder.with_quota_project_id(qpid);
             }
-            CredentialSource::Executable(source) => {
-                Self::make_credentials_from_source(source, config, quota_project_id)
-            }
-            CredentialSource::File { .. } => {
-                unimplemented!("file sourced credential not supported yet")
-            }
-            CredentialSource::Aws { .. } => {
-                unimplemented!("AWS sourced credential not supported yet")
+            
+            impersonated_builder.build()
+        } else {
+            let config = self.clone();
+            match self.credential_source {
+                CredentialSource::Url(source) => {
+                    Ok(Self::make_credentials_from_source(source, config, quota_project_id))
+                }
+                CredentialSource::Executable(source) => {
+                    Ok(Self::make_credentials_from_source(source, config, quota_project_id))
+                }
+                CredentialSource::File { .. } => {
+                    unimplemented!("file sourced credential not supported yet")
+                }
+                CredentialSource::Aws { .. } => {
+                    unimplemented!("AWS sourced credential not supported yet")
+                }
             }
         }
     }
@@ -345,7 +371,7 @@ impl Builder {
 
         let config: ExternalAccountConfig = file.into();
 
-        Ok(config.make_credentials(self.quota_project_id))
+        config.make_credentials(self.quota_project_id)
     }
 }
 
@@ -466,5 +492,40 @@ mod test {
                 unreachable!("expected Executable Sourced credential")
             }
         }
+    }
+
+    #[tokio::test]
+    async fn create_external_account_with_impersonation_via_parsing() {
+        let target_sa_email = "test-sa@example.iam.gserviceaccount.com";
+        let impersonation_url = format!("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{}:generateAccessToken", target_sa_email);
+        
+        let contents = json!({
+            "type": "external_account",
+            "audience": "audience_for_source",
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "token_url": "https://sts.googleapis.com/v1beta/token", // Source token URL
+            "service_account_impersonation_url": impersonation_url,
+            "credential_source": {
+                "url": "https://example.com/source_subject_token", 
+                "format": {
+                  "type": "json",
+                  "subject_token_field_name": "access_token"
+                }
+            }
+        });
+
+        let creds = Builder::new(contents.clone())
+            .with_quota_project_id("impersonated_quota_project")
+            .with_scopes(["impersonated_scope"])
+            .build()
+            .expect("Failed to build impersonated external account credentials via parsing");
+
+        let fmt_creds = format!("{:?}", creds);
+        assert!(fmt_creds.contains("ImpersonatedServiceAccount"), "Credentials should be ImpersonatedServiceAccount. Got: {}", fmt_creds);
+
+        assert!(fmt_creds.contains(target_sa_email), "Target SA email missing in debug output of ImpersonatedTokenProvider. Got: {}", fmt_creds);
+
+        assert!(fmt_creds.contains("impersonated_scope"), "Scope missing in debug output. Got: {}", fmt_creds);
+        assert!(fmt_creds.contains("impersonated_quota_project"), "Quota project ID missing in debug output. Got: {}", fmt_creds);
     }
 }

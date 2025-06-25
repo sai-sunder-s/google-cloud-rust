@@ -495,6 +495,34 @@ struct GenerateAccessTokenResponse {
     expire_time: String,
 }
 
+pub(crate) fn parse_target_principal_from_impersonation_url(url: &str) -> BuildResult<String> {
+    let end_marker = ":generateAccessToken";
+    let Some(end_index) = url.rfind(end_marker) else {
+        return Err(BuilderError::parsing(format!(
+            "Cannot extract target principal from URL: '{}', missing '{}'",
+            url, end_marker
+        )));
+    };
+
+    let url_before_marker = &url[..end_index];
+    let Some(start_index) = url_before_marker.rfind('/') else {
+        return Err(BuilderError::parsing(format!(
+            "Cannot extract target principal from URL: '{}', missing '/' before service account email",
+            url
+        )));
+    };
+
+    let target_principal = &url_before_marker[start_index + 1..];
+    if target_principal.is_empty() {
+        return Err(BuilderError::parsing(format!(
+            "Extracted empty target principal from URL: '{}'",
+            url
+        )));
+    }
+
+    Ok(target_principal.to_string())
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1326,5 +1354,36 @@ mod test {
         let _token = creds.headers(Extensions::new()).await?;
 
         Ok(())
+    }
+
+    #[test]
+    fn test_parse_target_principal() {
+        let valid_url = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/test-sa@example.iam.gserviceaccount.com:generateAccessToken";
+        assert_eq!(
+            parse_target_principal_from_impersonation_url(valid_url).unwrap(),
+            "test-sa@example.iam.gserviceaccount.com"
+        );
+
+        let url_with_project = "https://iamcredentials.googleapis.com/v1/projects/my-project/serviceAccounts/another-sa@another-project.iam.gserviceaccount.com:generateAccessToken";
+        assert_eq!(
+            parse_target_principal_from_impersonation_url(url_with_project).unwrap(),
+            "another-sa@another-project.iam.gserviceaccount.com"
+        );
+
+        let invalid_url_no_end_marker = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/test-sa@example.iam.gserviceaccount.com";
+        assert!(parse_target_principal_from_impersonation_url(invalid_url_no_end_marker).is_err());
+
+        let invalid_url_no_start_marker = "https://iamcredentials.googleapis.com/v1/projects/-/test-sa@example.iam.gserviceaccount.com:generateAccessToken";
+        assert!(
+            parse_target_principal_from_impersonation_url(invalid_url_no_start_marker).is_err()
+        );
+
+        let invalid_url_empty_sa = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/:generateAccessToken";
+        assert!(parse_target_principal_from_impersonation_url(invalid_url_empty_sa).is_err());
+
+        let malformed_url_marker_misplaced = "https://iamcredentials.googleapis.com/:generateAccessToken/projects/-/serviceAccounts/test-sa";
+        assert!(
+            parse_target_principal_from_impersonation_url(malformed_url_marker_misplaced).is_err()
+        );
     }
 }
