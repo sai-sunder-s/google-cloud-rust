@@ -240,6 +240,10 @@ where
         }
         return Some(DEFAULT_UNIVERSE_DOMAIN.to_string());
     }
+
+    fn cred_type(&self) -> &'static str {
+        "mds"
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -292,12 +296,20 @@ impl MDSAccessTokenProvider {
 impl TokenProvider for MDSAccessTokenProvider {
     async fn token(&self) -> Result<Token> {
         let client = Client::new();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            METADATA_FLAVOR,
+            HeaderValue::from_static(METADATA_FLAVOR_VALUE),
+        );
+        let mut client_info = crate::version::Version::default().to_string();
+        client_info.push_str(" auth-request-type/at cred-type/mds");
+        headers.insert(
+            "x-goog-api-client",
+            HeaderValue::from_str(&client_info).unwrap(),
+        );
         let request = client
             .get(format!("{}{}/token", self.endpoint, MDS_DEFAULT_URI))
-            .header(
-                METADATA_FLAVOR,
-                HeaderValue::from_static(METADATA_FLAVOR_VALUE),
-            );
+            .headers(headers);
         // Use the `scopes` option if set, otherwise let the MDS use the default
         // scopes.
         let scopes = self.scopes.as_ref().map(|v| v.join(","));
@@ -953,6 +965,38 @@ mod test {
             .unwrap();
         assert_eq!(universe_domain_response, universe_domain);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_token_request_headers() -> TestResult {
+        let response = MDSTokenResponse {
+            access_token: "test-access-token".to_string(),
+            expires_in: Some(3600),
+            token_type: "test-token-type".to_string(),
+        };
+        let response_body = serde_json::to_value(&response).unwrap();
+
+        let (endpoint, _server) = start(Handlers::from([(
+            format!("{MDS_DEFAULT_URI}/token"),
+            (
+                StatusCode::OK,
+                response_body,
+                TokenQueryParams {
+                    scopes: None,
+                    recursive: None,
+                },
+                Arc::new(Mutex::new(0)),
+            ),
+        )]))
+        .await;
+
+        let provider = MDSAccessTokenProvider::builder()
+            .endpoint(endpoint)
+            .endpoint_overridden(true)
+            .created_by_adc(false)
+            .build();
+        let _ = provider.token().await?;
         Ok(())
     }
 }

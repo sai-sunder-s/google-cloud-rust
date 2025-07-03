@@ -128,6 +128,10 @@ impl Credentials {
         self.inner.headers(extensions).await
     }
 
+    pub fn cred_type(&self) -> &'static str {
+        self.inner.cred_type()
+    }
+
     pub async fn universe_domain(&self) -> Option<String> {
         self.inner.universe_domain().await
     }
@@ -199,6 +203,9 @@ pub trait CredentialsProvider: std::fmt::Debug {
         extensions: Extensions,
     ) -> impl Future<Output = Result<CacheableResource<HeaderMap>>> + Send;
 
+    /// Returns the credential type.
+    fn cred_type(&self) -> &'static str;
+
     /// Retrieves the universe domain associated with the credentials, if any.
     fn universe_domain(&self) -> impl Future<Output = Option<String>> + Send;
 }
@@ -233,6 +240,9 @@ pub(crate) mod dynamic {
         ///   generating the headers.
         async fn headers(&self, extensions: Extensions) -> Result<CacheableResource<HeaderMap>>;
 
+        /// Returns the credential type.
+        fn cred_type(&self) -> &'static str;
+
         /// Retrieves the universe domain associated with the credentials, if any.
         async fn universe_domain(&self) -> Option<String> {
             Some("googleapis.com".to_string())
@@ -247,6 +257,9 @@ pub(crate) mod dynamic {
     {
         async fn headers(&self, extensions: Extensions) -> Result<CacheableResource<HeaderMap>> {
             T::headers(self, extensions).await
+        }
+        fn cred_type(&self) -> &'static str {
+            T::cred_type(self)
         }
         async fn universe_domain(&self) -> Option<String> {
             T::universe_domain(self).await
@@ -656,6 +669,10 @@ pub mod testing {
             })
         }
 
+        fn cred_type(&self) -> &'static str {
+            "test"
+        }
+
         async fn universe_domain(&self) -> Option<String> {
             None
         }
@@ -677,6 +694,10 @@ pub mod testing {
     impl CredentialsProvider for ErrorCredentials {
         async fn headers(&self, _extensions: Extensions) -> Result<CacheableResource<HeaderMap>> {
             Err(super::CredentialsError::from_msg(self.0, "test-only"))
+        }
+
+        fn cred_type(&self) -> &'static str {
+            "error"
         }
 
         async fn universe_domain(&self) -> Option<String> {

@@ -440,6 +440,10 @@ where
         let token = self.token_provider.token(extensions).await?;
         build_cacheable_headers(&token, &self.quota_project_id)
     }
+
+    fn cred_type(&self) -> &'static str {
+        "sa"
+    }
 }
 
 #[cfg(test)]

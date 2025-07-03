@@ -64,14 +64,14 @@ impl Client {
         path: http::uri::PathAndQuery,
         request: Request,
         options: gax::options::RequestOptions,
-        api_client_header: &'static str,
+        api_client_header: &str,
         request_params: &str,
     ) -> Result<tonic::Response<Response>>
     where
         Request: prost::Message + 'static + Clone,
         Response: prost::Message + Default + 'static,
     {
-        let headers = Self::make_headers(api_client_header, request_params).await?;
+        let headers = self.make_headers(api_client_header, request_params).await?;
         match self.get_retry_policy(&options) {
             None => {
                 self.request_attempt::<Request, Response>(
@@ -201,13 +201,16 @@ impl Client {
     }
 
     async fn make_headers(
-        api_client_header: &'static str,
+        &self,
+        api_client_header: &str,
         request_params: &str,
     ) -> Result<http::header::HeaderMap> {
         let mut headers = HeaderMap::new();
+        let cred_type = self.credentials.cred_type();
+        let api_client_header = format!("{} cred-type/{}", api_client_header, cred_type);
         headers.append(
             http::header::HeaderName::from_static("x-goog-api-client"),
-            http::header::HeaderValue::from_static(api_client_header),
+            http::header::HeaderValue::from_str(&api_client_header).map_err(Error::ser)?,
         );
         if !request_params.is_empty() {
             // When using routing info to populate the request parameters it is

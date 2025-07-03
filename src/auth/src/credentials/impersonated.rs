@@ -395,6 +395,10 @@ where
         let token = self.token_provider.token(extensions).await?;
         build_cacheable_headers(&token, &self.quota_project_id)
     }
+
+    fn cred_type(&self) -> &'static str {
+        "impersonated_service_account"
+    }
 }
 
 struct ImpersonatedTokenProvider {
@@ -976,6 +980,9 @@ mod test {
                 _extensions: Extensions,
             ) -> Result<CacheableResource<HeaderMap>> {
                 Err(errors::non_retryable_from_str("source failed"))
+            }
+            fn cred_type(&self) -> &'static str {
+                "mock_source_fail"
             }
         }
 

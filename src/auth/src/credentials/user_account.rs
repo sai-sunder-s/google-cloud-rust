@@ -261,10 +261,17 @@ impl TokenProvider for UserTokenProvider {
             refresh_token: self.refresh_token.clone(),
             scopes: self.scopes.clone(),
         };
-        let header = HeaderValue::from_static("application/json");
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        let mut client_info = crate::version::Version::default().to_string();
+        client_info.push_str(" auth-request-type/at cred-type/u");
+        headers.insert(
+            "x-goog-api-client",
+            HeaderValue::from_str(&client_info).unwrap(),
+        );
         let builder = client
             .request(Method::POST, self.endpoint.as_str())
-            .header(CONTENT_TYPE, header)
+            .headers(headers)
             .json(&req);
         let resp = builder
             .send()
@@ -314,6 +321,10 @@ where
     async fn headers(&self, extensions: Extensions) -> Result<CacheableResource<HeaderMap>> {
         let token = self.token_provider.token(extensions).await?;
         build_cacheable_headers(&token, &self.quota_project_id)
+    }
+
+    fn cred_type(&self) -> &'static str {
+        "u"
     }
 }
 
@@ -1001,6 +1012,35 @@ mod test {
         let e = Builder::new(authorized_user).build().unwrap_err();
         assert!(e.is_parsing(), "{e}");
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_token_request_headers() -> TestResult {
+        let response = Oauth2RefreshResponse {
+            access_token: "test-access-token".to_string(),
+            expires_in: Some(3600),
+            refresh_token: Some("test-refresh-token".to_string()),
+            scope: None,
+            token_type: "test-token-type".to_string(),
+        };
+        let response_body = serde_json::to_value(&response).unwrap();
+        let (endpoint, _server) =
+            start(StatusCode::OK, response_body, Arc::new(Mutex::new(0))).await;
+        println!("endpoint = {endpoint}");
+
+        let authorized_user = serde_json::json!({
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "refresh_token": "test-refresh-token",
+            "type": "authorized_user",
+            "token_uri": endpoint,
+        });
+        let cred = Builder::new(authorized_user)
+            .with_quota_project_id("test-project")
+            .build()?;
+
+        let _ = cred.headers(Extensions::new()).await?;
         Ok(())
     }
 }

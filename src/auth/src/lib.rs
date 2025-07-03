@@ -59,3 +59,5 @@ pub(crate) type Result<T> = std::result::Result<T, errors::CredentialsError>;
 ///
 /// [Credentials]: https://cloud.google.com/docs/authentication#credentials
 pub(crate) mod headers_util;
+
+mod version;

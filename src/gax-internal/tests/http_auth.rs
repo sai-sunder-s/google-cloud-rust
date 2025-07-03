@@ -33,6 +33,7 @@ mod test {
         impl CredentialsProvider for Credentials {
             async fn headers(&self, extensions: Extensions) -> AuthResult<CacheableResource<HeaderMap>>;
             async fn universe_domain(&self) -> Option<String>;
+            fn cred_type(&self) -> &'static str;
         }
     }
 
@@ -60,6 +61,7 @@ mod test {
                 data: header,
             })
         });
+        mock.expect_cred_type().return_const("mock");
 
         let client = echo_server::builder(endpoint)
             .with_credentials(Credentials::from(mock))
@@ -91,6 +93,7 @@ mod test {
         mock.expect_headers()
             .times(retry_count..)
             .returning(|_extensions| Err(CredentialsError::from_msg(true, "mock retryable error")));
+        mock.expect_cred_type().return_const("mock");
 
         let retry_policy = Aip194Strict.with_attempt_limit(retry_count as u32);
         let client = echo_server::builder(endpoint)
@@ -129,6 +132,7 @@ mod test {
         mock.expect_headers()
             .times(1)
             .returning(move |_extensions| headers_response.clone());
+        mock.expect_cred_type().return_const("mock");
 
         let client = echo_server::builder(endpoint)
             .with_credentials(Credentials::from(mock))

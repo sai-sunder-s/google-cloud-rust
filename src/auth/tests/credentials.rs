@@ -388,6 +388,7 @@ mod test {
         impl CredentialsProvider for Credentials {
             async fn headers(&self, extensions: Extensions) -> std::result::Result<CacheableResource<HeaderMap>, CredentialsError>;
             async fn universe_domain(&self) -> Option<String>;
+            fn cred_type(&self) -> &'static str;
         }
     }
 
